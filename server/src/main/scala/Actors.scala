@@ -234,6 +234,8 @@ trait Actors extends DynamoDb { self: core.Core with core.Configuration with git
       launcher
     }
 
+    private def findFirst[T](futures: Stream[Future[T]])(p: T => Boolean): Future[T] =
+
     private def synchBuildStatus(combiCommitStatus: CombiCommitStatus, job: String): Future[String] = {
       val jobStatus    = combiCommitStatus.statuses.find(_.forJob(job))
       val githubReport = jobStatus.flatMap(cs => cs.target_url.map(url => (cs.state, url)))
@@ -244,7 +246,7 @@ trait Actors extends DynamoDb { self: core.Core with core.Configuration with git
 
       val syncher = (for {
         bss <- jenkinsApi.buildStatusesForJob(job)
-        mostRecentBuild <- jenkinsApi.buildStatusesForJob(job).map(_.find(_.paramsMatch(expected))) // first == most recent
+        mostRecentBuild <- findFirst(bss)(_.paramsMatch(expected)) // first == most recent
         if githubReport != mostRecentBuild.map(summarizeBuildStatus)
       } yield {
         // the status we found on the PR didn't match what Jenkins told us --> synch
