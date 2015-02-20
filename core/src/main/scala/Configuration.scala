@@ -10,6 +10,7 @@ trait Configuration { self: Core =>
   object Config {
     case class Github(user: String, repo: String, host: String, token: String)
     case class Jenkins(job: String, host: String, user: String, token: String, jobPrefix: String)
+    case class Jira(user: String, pass: String, host: String = "issues.scala-lang.org", project: String = "SI", cacheDir: String = "/tmp")
   }
   import Config._
   case class Config(github: Github, jenkins: Jenkins)
