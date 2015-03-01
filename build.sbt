@@ -34,8 +34,8 @@ lazy val root = Project(
         // entrypoint
         mainClass in Compile := Some("scabot.server.Scabot")),
     // always run all commands on each sub project
-    aggregate = Seq(core, amazon, github, jenkins, server)
-) dependsOn(core, amazon, github, jenkins, server) // this does the actual aggregation
+    aggregate = Seq(core, amazon, github, jenkins, jira, server)
+) dependsOn(core, amazon, github, jenkins, jira, server) // this does the actual aggregation
 
 // enablePlugins(AkkaAppPackaging)
 

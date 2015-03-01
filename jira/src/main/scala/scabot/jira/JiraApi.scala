@@ -1,283 +1,65 @@
 package scabot
-package jenkins
+package jira
 
 import java.io.{DataInputStream, File, FileInputStream, FileOutputStream, InputStream}
+import java.text.{ParseException, SimpleDateFormat}
 import java.util.Date
 
+import akka.actor.ActorSystem
 import spray.client.pipelining._
 import spray.http.{Uri, BasicHttpCredentials}
+import spray.httpx.unmarshalling.FromStringDeserializer
+import spray.json._
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
+import scala.util.Try
 
 
 trait JiraApi extends JiraApiTypes with JiraJsonProtocol with JiraApiActions {
   self: core.Core with core.Configuration with core.HttpClient =>
 }
-/*
-{
-    "expand": "renderedFields,names,schema,transitions,operations,editmeta,changelog",
-    "fields": {
-        "assignee": null,
-        "attachment": [
-            {
-                "author": {
-                    "active": true,
-                    "displayName": "Olivier Chafik",
-                    "name": "ochafik",
-                    "self": "https://issues.scala-lang.org/rest/api/2/user?username=ochafik"
-                },
-                "content": "https://issues.scala-lang.org/secure/attachment/16511/bug.scala",
-                "created": "2015-02-16T00:22:33.000+0100",
-                "filename": "bug.scala",
-                "id": "16511",
-                "mimeType": "application/octet-stream",
-                "self": "https://issues.scala-lang.org/rest/api/2/attachment/16511",
-                "size": 358
-            },
-        ],
-        "comment": {
-            "comments": [                {
-                    "author": {
-                        "active": true,
-                        "displayName": "Ismael Juma",
-                        "name": "ijuma",
-                        "self": "https://issues.scala-lang.org/rest/api/2/user?username=ijuma"
-                    },
-                    "body": "Adding link to my message that explains what I think is missing in the bytecode with a test that fails in 2.7.x too:\n\nhttp://article.gmane.org/gmane.comp.lang.scala.internals/1337",
-                    "created": "2009-09-27T06:40:55.000+0200",
-                    "id": "46401",
-                    "self": "https://issues.scala-lang.org/rest/api/2/issue/21609/comment/46401",
-                    "updateAuthor": {
-                        "active": true,
-                        "displayName": "Ismael Juma",
-                        "name": "ijuma",
-                        "self": "https://issues.scala-lang.org/rest/api/2/user?username=ijuma"
-                    },
-                    "updated": "2009-09-27T06:40:55.000+0200"
-                },],
-            "maxResults": 0,
-            "startAt": 0,
-            "total": 0
-        },
-        "components": [
-            {
-                "id": "10601",
-                "name": "Type Inference",
-                "self": "https://issues.scala-lang.org/rest/api/2/component/10601"
-            }
-        ],
-        "created": "2015-02-16T00:22:33.000+0100",
-        "creator": {
-            "active": true,
-            "displayName": "Olivier Chafik",
-            "name": "ochafik",
-            "self": "https://issues.scala-lang.org/rest/api/2/user?username=ochafik"
-        },
-        "customfield_10005": [
-            {
-                "active": true,
-                "displayName": "Ismael Juma",
-                "name": "ijuma",
-                "self": "https://issues.scala-lang.org/rest/api/2/user?username=ijuma"
-            },
-            {
-                "active": true,
-                "displayName": "Paul Phillips",
-                "name": "extempore",
-                "self": "https://issues.scala-lang.org/rest/api/2/user?username=extempore"
-            }
-        ],
-        "customfield_10101": null,
-        "description": "The following repo case crashes scalac 2.11 and 2.10 with an OOM exception, or hangs pretty much forever if scalac is given loads of memory.\r\n\r\nI haven't managed to reduce it further, but I'm under the impression it has to do with the widening of type constraints in the nested maps (where empty strings are returned).\r\n\r\n{code:title=bug.scala|borderStyle=solid}\r\n// scalac bug.scala\r\nclass ImGonnaTakeForeverToCompile {\r\n  abstract class Foo extends Ordered[Foo]\r\n\r\n  val seq: Seq[Int] = null\r\n  val set: Set[Int] = null\r\n  val map: Map[Int, Int] = null\r\n  val values: Map[Int, Set[Foo]] = null\r\n\r\n  map ++ set.map(_ -> \"\")\r\n\r\n  values ++ seq.groupBy(_ / 2).toSeq.map({\r\n    case (key, group) =>\r\n      key -> (values(key) ++ group.map(_ => \"\"))\r\n  })\r\n}\r\n{code}\r\n\r\n(I fixed my original non-reduced code by avoiding a widening that was introduced by mistake)\r\n\r\nA quick jconsole sampling shows some / lots of time is spent in `scala.reflect.internal.tpe.TypeConstraints.solve`.",
-        "duedate": null,
-        "environment": "MacOS X + Java 1.8",
-        "fixVersions": [],
-        "issuelinks": [
-        {"id":"12114","self":"https://issues.scala-lang.org/rest/api/2/issueLink/12114",
-        "type":{"id":"10003","name":"Relates","inward":"relates to","outward":"relates to","self":"https://issues.scala-lang.org/rest/api/2/issueLinkType/10003"},"inwardIssue":{"id":"28176","key":"SI-7637","self":"https://issues.scala-lang.org/rest/api/2/issue/28176","fields":{"summary":"REPL :edit command","status":{"self":"https://issues.scala-lang.org/rest/api/2/status/6","description":"The issue is considered finished, the resolution is correct. Issues which are closed can be reopened.","iconUrl":"https://issues.scala-lang.org/images/icons/statuses/closed.png","name":"CLOSED","id":"6","statusCategory":{"self":"https://issues.scala-lang.org/rest/api/2/statuscategory/3","id":3,"key":"done","colorName":"green","name":"Complete"}},"priority":{"self":"https://issues.scala-lang.org/rest/api/2/priority/3","iconUrl":"https://issues.scala-lang.org/images/icons/priorities/major.png","name":"Major","id":"3"},"issuetype":{"self":"https://issues.scala-lang.org/rest/api/2/issuetype/4","id":"4","description":"An improvement or enhancement to an existing feature or task.","iconUrl":"https://issues.scala-lang.org/images/icons/issuetypes/improvement.png","name":"Improvement","subtask":false}}}}
-        ],
-        "issuetype": {
-            "description": "A problem which impairs or prevents the functions of the product.",
-            "iconUrl": "https://issues.scala-lang.org/images/icons/issuetypes/bug.png",
-            "id": "1",
-            "name": "Bug",
-            "self": "https://issues.scala-lang.org/rest/api/2/issuetype/1",
-            "subtask": false
-        },
-        "labels": [
-            "compiler-crash",
-            "does-not-compile"
-        ],
-        "lastViewed": "2015-02-19T22:35:08.300+0100",
-        "priority": {
-            "iconUrl": "https://issues.scala-lang.org/images/icons/priorities/major.png",
-            "id": "3",
-            "name": "Major",
-            "self": "https://issues.scala-lang.org/rest/api/2/priority/3"
-        },
-        "project": {
-            "id": "10005",
-            "key": "SI",
-            "name": "Scala Programming Language",
-            "self": "https://issues.scala-lang.org/rest/api/2/project/10005"
-        },
-        "reporter": {
-            "active": true,
-            "displayName": "Olivier Chafik",
-            "name": "ochafik",
-            "self": "https://issues.scala-lang.org/rest/api/2/user?username=ochafik"
-        },
-        "resolution": {
-            "description": "A fix for this issue is checked into the tree and tested.",
-            "id": "1",
-            "name": "Fixed",
-            "self": "https://issues.scala-lang.org/rest/api/2/resolution/1"
-        },
-        "resolutiondate": null,
-        "status": {
-            "description": "The issue is open and ready for the assignee to start work on it.",
-            "iconUrl": "https://issues.scala-lang.org/images/icons/statuses/open.png",
-            "id": "1",
-            "name": "Open",
-            "self": "https://issues.scala-lang.org/rest/api/2/status/1",
-            "statusCategory": {
-                "colorName": "blue-gray",
-                "id": 2,
-                "key": "new",
-                "name": "New",
-                "self": "https://issues.scala-lang.org/rest/api/2/statuscategory/2"
-            }
-        },
-        "subtasks": [],
-        "summary": "OutOfMemory / hang of scalac (typer bug?)",
-        "updated": "2015-02-16T00:22:33.000+0100",
-        "versions": [
-            {
-                "archived": false,
-                "id": "11900",
-                "name": "Scala 2.10.4",
-                "releaseDate": "2014-03-18",
-                "released": true,
-                "self": "https://issues.scala-lang.org/rest/api/2/version/11900"
-            },
-            {
-                "archived": false,
-                "id": "12102",
-                "name": "Scala 2.11.4",
-                "releaseDate": "2014-10-30",
-                "released": true,
-                "self": "https://issues.scala-lang.org/rest/api/2/version/12102"
-            }
-        ],
-        "votes": {
-            "hasVoted": false,
-            "self": "https://issues.scala-lang.org/rest/api/2/issue/SI-9151/votes",
-            "votes": 0
-        },
-        "watches": {
-            "isWatching": false,
-            "self": "https://issues.scala-lang.org/rest/api/2/issue/SI-9151/watchers",
-            "watchCount": 2
-        },
-        "workratio": -1
-    },
-    "id": "30292",
-    "key": "SI-9151",
-    "self": "https://issues.scala-lang.org/rest/api/latest/issue/30292"
-}
 
-*/
 trait JiraApiTypes {
   self: core.Core with core.Configuration =>
 
-  case class Project(projectId: String, name: String, description: String, lead: String, startingNumber: Int = 1)
-
-  case class User(name: String, displayName: String, emailAddress: Option[String])(val groups: concurrent.Future[List[String]]) {
-    override def toString = displayName
-  }
-
-  case class Version(name: String, description: Option[String], releaseDate: Option[Date], archived: Boolean, released: Boolean) {
-    override def toString = name
-  }
-
-  case class Comment(author: User, body: String, updateAuthor: User, created: Date, updated: Date) {
-    override def toString = s"on $created, $author said '$body' ($updated, $updateAuthor)"
-  }
-
-  case class Attachment(filename: String, author: User, created: Date, content: String, size: Int, mimeType: String, properties: Map[String, Any])
-
-  sealed class IssueLinkType(val name: String, val inward: String, val outward: String) {
-    def directed = outward != inward
-  }
-
-  case object Relates extends IssueLinkType("Relates", "relates to", "relates to")
-
-  case object Duplicates extends IssueLinkType("Duplicates", "is duplicated by", "duplicates")
-
-  case object Blocks extends IssueLinkType("Blocks", "is blocked by", "blocks")
-
-  case object Clones extends IssueLinkType("Clones", "is cloned by", "clones")
-
-  case class IssueLink(`type`: Named, sourceKey: String, targetKey: String) {
-    override def toString = s"$sourceKey ${kind.name} $targetKey"
-  }
-
-  case class Named(name: String)
+  case class Issue(key: String, fields: Fields)
+  case class Fields(summary: String, description: Option[String], comment: Comments, issuelinks: List[IssueLink], attachment: List[Attachment], assignee: Option[User], creator: User, reporter: User, status: Named, resolution: Option[Named],  labels: List[String], components: List[Named], issuetype: Named, priority: Named, environment: Option[String], created:  Date, updated: Date, resolutiondate: Option[Date], versions: List[Version], fixVersions: List[Version],  customfield_10005: Option[List[User]], votes: Votes, watches: Watches)
+  case class Attachment(filename: String, author: User, created: Date, content: String, size: Int, mimeType: String) // , properties: Map[String, Any]
+  case class Comment(author: User, body: String, updateAuthor: User, created: Date, updated: Date)
   case class Comments(comments: List[Comment], maxResults: Int, total: Int, startAt: Int)
+  case class IssueLink(`type`: Named, inwardIssue: Option[Keyed], outwardIssue: Option[Keyed])
+  case class User(name: String, displayName: String, emailAddress: Option[String])
+  case class Version(name: String, description: Option[String], releaseDate: Option[Date], archived: Boolean, released: Boolean)
   case class Votes(votes: Int)
   case class Watches(watchCount: Int)
 
-  case class Fields(
-    summary: String,
-    description: String,
-    comment: Comments,
-    issuelinks: List[IssueLink],
-    attachment: List[Attachment],
-    assignee: User,
-    creator: User,
-    reporter: User,
-    status: Named,
-    resolution: Named,
-    labels: List[String],
-    components: List[Named],
-    issuetype: Named,
-    priority: Named,
-    environment: String,
-    created: Date,
-    updated: Date,
-    resolutiondate: Date,
-    versions: List[Version],
-    fixVersions: List[Version],
-    customfield_10005: List[User],
-    votes: Votes,
-    watches: Watches)
+  case class Keyed(key: String)
+  case class Named(name: String)
 
-  case class Issue(key: String, fields: Fields)
+//  case class IssueError(errorMessages: List[String])
 
-  trait IssuesTransform {
-    def apply(x: User): User
-
-    def apply(x: Version): Version
-
-    def apply(x: IssueLinkType): IssueLinkType
-
-    def mapOver(x: Any): Any = {
-      x match {
-        case u: User => apply(u)
-        case v: Version => apply(v)
-        case Comment(a, b, ua, c, u) => Comment(apply(a), b, apply(ua), c, u)
-        case Attachment(f, a, c, d, s, m, p) => Attachment(f, apply(a), c, d, s, m, p)
-        case ilt: IssueLinkType => apply(ilt)
-        case IssueLink(ilt, o, i) => IssueLink(apply(ilt), o, i)
-        case Issue(key, fields) => Issue(key, fields map { case (k, v) => (k, mapOver(v))})
-        case xs: Iterable[Any] => xs.map(mapOver)
-        case x => x
-      }
-    }
-  }
-
-}
+//  trait IssuesTransform {
+//    def apply(x: User): User
+//
+//    def apply(x: Version): Version
+//
+//    def apply(x: IssueLinkType): IssueLinkType
+//
+//    def mapOver(x: Any): Any = {
+//      x match {
+//        case u: User => apply(u)
+//        case v: Version => apply(v)
+//        case Comment(a, b, ua, c, u) => Comment(apply(a), b, apply(ua), c, u)
+//        case Attachment(f, a, c, d, s, m, p) => Attachment(f, apply(a), c, d, s, m, p)
+//        case ilt: IssueLinkType => apply(ilt)
+//        case IssueLink(ilt, o, i) => IssueLink(apply(ilt), o, i)
+//        case Issue(key, fields) => Issue(key, fields map { case (k, v) => (k, mapOver(v))})
+//        case xs: Iterable[Any] => xs.map(mapOver)
+//        case x => x
+//      }
+//    }
+//  }
 
 }
 
@@ -285,8 +67,89 @@ trait JiraApiTypes {
 trait JiraJsonProtocol extends JiraApiTypes with DefaultJsonProtocol {
   self: core.Core with core.Configuration =>
   private type RJF[x] = RootJsonFormat[x]
-//  implicit lazy val _fmtJob: RJF[Job] = jsonFormat7(Job.apply)
 
+  implicit object dateFmt extends JsonFormat[Date] {
+    lazy val dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
+    lazy val shortDateFormat = new SimpleDateFormat("yyyy-MM-dd")
+
+    def read(value: JsValue): Date = value match {
+      case JsString(rawDate) =>
+        try dateFormat.parse(rawDate)
+        catch { case p: ParseException =>
+          try shortDateFormat.parse(rawDate)
+          catch { case p: ParseException => deserializationError(s"Expected Date format, got $rawDate") }
+        }
+      case _ => deserializationError(s"Expected JsString, got $value")
+    }
+
+    def write(date: Date) = JsString(dateFormat.format(date))
+  }
+
+  implicit object _fmtFields extends JsonFormat[Fields] {
+    private def w[T: JsonWriter](x: T) = implicitly[JsonWriter[T]].write(x)
+    def write(p: Fields): JsObject =
+      JsObject(
+        ("summary", w(p.summary)),
+        ("description", w(p.description)),
+        ("comment", w(p.comment)),
+        ("issuelinks", w(p.issuelinks)),
+        ("attachment", w(p.attachment)),
+        ("assignee", w(p.assignee)),
+        ("creator", w(p.creator)),
+        ("reporter", w(p.reporter)),
+        ("status", w(p.status)),
+        ("resolution", w(p.resolution)),
+        ("labels", w(p.labels)),
+        ("components", w(p.components)),
+        ("issuetype", w(p.issuetype)),
+        ("priority", w(p.priority)),
+        ("environment", w(p.environment)),
+        ("created", w(p.created)),
+        ("updated", w(p.updated)),
+        ("resolutiondate", w(p.resolutiondate)),
+        ("versions", w(p.versions)),
+        ("fixVersions", w(p.fixVersions)),
+        ("customfield_10005", w(p.customfield_10005)),
+        ("votes", w(p.votes)),
+        ("watches", w(p.watches)))
+
+    def read(value: JsValue) = Fields(
+      fromField[String](value,             "summary"),
+      fromField[Option[String]](value,     "description"),
+      fromField[Comments](value,           "comment"),
+      fromField[List[IssueLink]](value,    "issuelinks"),
+      fromField[List[Attachment]](value,   "attachment"),
+      fromField[Option[User]](value,       "assignee"),
+      fromField[User](value,               "creator"),
+      fromField[User](value,               "reporter"),
+      fromField[Named](value,              "status"),
+      fromField[Option[Named]](value,      "resolution"),
+      fromField[List[String]](value,       "labels"),
+      fromField[List[Named]](value,        "components"),
+      fromField[Named](value,              "issuetype"),
+      fromField[Named](value,              "priority"),
+      fromField[Option[String]](value,     "environment"),
+      fromField[Date](value,               "created"),
+      fromField[Date](value,               "updated"),
+      fromField[Option[Date]](value,       "resolutiondate"),
+      fromField[List[Version]](value,      "versions"),
+      fromField[List[Version]](value,      "fixVersions"),
+      fromField[Option[List[User]]](value, "customfield_10005"),
+      fromField[Votes](value,              "votes"),
+      fromField[Watches](value,            "watches"))
+  }
+
+  implicit lazy val _fmtAttachment: RJF[Attachment] = jsonFormat6(Attachment.apply)
+  implicit lazy val _fmtComment: RJF[Comment]       = jsonFormat5(Comment.apply)
+  implicit lazy val _fmtComments: RJF[Comments]     = jsonFormat4(Comments.apply)
+  implicit lazy val _fmtIssue: RJF[Issue]           = jsonFormat2(Issue.apply)
+  implicit lazy val _fmtIssueLink: RJF[IssueLink]   = jsonFormat3(IssueLink.apply)
+  implicit lazy val _fmtKeyed: RJF[Keyed]           = jsonFormat1(Keyed.apply)
+  implicit lazy val _fmtNamed: RJF[Named]           = jsonFormat1(Named.apply)
+  implicit lazy val _fmtUser: RJF[User]             = jsonFormat3(User.apply)
+  implicit lazy val _fmtVersion: RJF[Version]       = jsonFormat5(Version.apply)
+  implicit lazy val _fmtVotes: RJF[Votes]           = jsonFormat1(Votes.apply)
+  implicit lazy val _fmtWatches: RJF[Watches]       = jsonFormat1(Watches.apply)
 }
 
 trait JiraApiActions extends JiraJsonProtocol {
@@ -296,8 +159,7 @@ trait JiraApiActions extends JiraJsonProtocol {
     def jiraUrl(uri: String) = s"${config.host}$uri"
     def jiraCacheDir = config.cacheDir
 
-
-    private def fileFor(key: Int) = new File(s"$cacheDir/${key}.json")
+    private def fileFor(key: Int) = new File(s"$jiraCacheDir/${key}.json")
 
     import spray.http.{GenericHttpCredentials, Uri}
     import spray.httpx.SprayJsonSupport._
@@ -307,32 +169,50 @@ trait JiraApiActions extends JiraJsonProtocol {
 
     def api(rest: String) = Uri("/rest/api/latest/" + rest)
 
-
     def issue(number: Int) = p[Issue](Get(api("issue" / s"${config.project}-$number")))
-
   }
+}
+
+trait Caching extends JiraJsonProtocol {
+  self: core.Core with core.Configuration =>
+
+  private def readFully(in: InputStream, bufferSize: Int = 1024): String = {
+    val bytes = new Array[Byte](bufferSize)
+    val contents = ArrayBuffer[Byte]()
+
+    @annotation.tailrec
+    def read(): Unit =
+      in.read(bytes) match {
+        case -1 =>
+        case count =>
+          val data = new Array[Byte](count)
+          Array.copy(bytes, 0, data, 0, count)
+          contents ++= data
+          read()
+      }
+
+    read()
+    new String(contents.toArray)
+  }
+
+  def loadCachedIssue(p: String): Option[Issue] = Try {
+    val f = new File(p)
+    val data = new Array[Byte](f.length.asInstanceOf[Int])
+    Some(jsonReader[Issue].read(JsonParser(readFully(new DataInputStream(new FileInputStream(f))))))
+  } getOrElse (None)
+
+}
+
+object jiraCLI extends core.Core with core.Configuration with Caching {
+  implicit lazy val system: ActorSystem = ActorSystem("jiraCLI")
+
+  override def tellProjectActor(user: String, repo: String)(msg: jiraCLI.ProjectMessage): Unit = ???
+
+  val issues = 1 to 9200 flatMap {i => println(i); loadCachedIssue(s"/Users/adriaan/Desktop/jira/$i.json")}
 }
 
 //
 //
-//private def readFully(in: InputStream, bufferSize: Int = 1024): Array[Byte] = {
-//val bytes = new Array[Byte](bufferSize)
-//val contents = ArrayBuffer[Byte]()
-//
-//@annotation.tailrec
-//def read(): Unit =
-//in.read(bytes) match {
-//case -1 =>
-//case count =>
-//val data = new Array[Byte](count)
-//Array.copy(bytes, 0, data, 0, count)
-//contents ++= data
-//read()
-//}
-//
-//read()
-//contents.toArray
-//}
 //
 //private lazy val cacheDir = {
 //assert(new File(jiraCacheDir).isDirectory(), s"Please create cache directory $cacheDir to avoid hammering the jira server.")
