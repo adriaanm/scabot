@@ -4,7 +4,10 @@ name := "scabot"
 
 organization in ThisBuild := "com.typesafe"
 version      in ThisBuild := "0.1.0"
-scalaVersion in ThisBuild := "2.11.5"
+scalaVersion in ThisBuild := "2.11.6"
+
+resolvers    in ThisBuild += "staging1" at "https://oss.sonatype.org/content/repositories/orgscala-lang-1184/"
+resolvers    in ThisBuild += "staging2" at "https://oss.sonatype.org/content/repositories/orgscala-lang-1185/"
 
 lazy val deps: Seq[sbt.Def.Setting[_]] =  Seq(
   libraryDependencies ++= Seq(
