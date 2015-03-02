@@ -24,7 +24,7 @@ trait JiraApiTypes {
   self: core.Core with core.Configuration =>
 
   case class Issue(key: String, fields: Fields)
-  case class Fields(summary: String, description: Option[String], comment: Comments, issuelinks: List[IssueLink], attachment: List[Attachment], assignee: Option[User], creator: User, reporter: User, status: Named, resolution: Option[Named],  labels: List[String], components: List[Named], issuetype: Named, priority: Named, environment: Option[String], created:  Date, updated: Date, resolutiondate: Option[Date], versions: List[Version], fixVersions: List[Version],  customfield_10005: Option[List[User]], votes: Votes, watches: Watches)
+  case class Fields(summary: String, description: Option[String], comment: Comments, issuelinks: List[IssueLink], attachment: List[Attachment], assignee: Option[User], creator: User, reporter: User, status: Named, resolution: Option[Named],  labels: List[String], components: List[Named], issuetype: Named, priority: Named, environment: Option[String], created:  Date, updated: Date, resolutiondate: Option[Date], versions: List[Version], fixVersions: List[Version],  watchers: Option[List[User]], votes: Votes, watches: Watches)
   case class Attachment(filename: String, author: User, created: Date, content: String, size: Int, mimeType: String) // , properties: Map[String, Any]
   case class Comment(author: User, body: String, updateAuthor: User, created: Date, updated: Date)
   case class Comments(comments: List[Comment], maxResults: Int, total: Int, startAt: Int)
@@ -109,7 +109,7 @@ trait JiraJsonProtocol extends JiraApiTypes with DefaultJsonProtocol {
         ("resolutiondate", w(p.resolutiondate)),
         ("versions", w(p.versions)),
         ("fixVersions", w(p.fixVersions)),
-        ("customfield_10005", w(p.customfield_10005)),
+        ("customfield_10005", w(p.watchers)),
         ("votes", w(p.votes)),
         ("watches", w(p.watches)))
 
@@ -208,7 +208,83 @@ object jiraCLI extends core.Core with core.Configuration with Caching {
 
   override def tellProjectActor(user: String, repo: String)(msg: jiraCLI.ProjectMessage): Unit = ???
 
-  val issues = 1 to 9200 flatMap {i => println(i); loadCachedIssue(s"/Users/adriaan/Desktop/jira/$i.json")}
+  val issues = (1 to 9200).par.flatMap {i => println(i); loadCachedIssue(s"/Users/adriaan/Desktop/jira/$i.json")}.seq
+  val mostCommented = issues.sortBy(_.fields.comment.total)
+  assert(issues.find{i => val c = i.fields.comment; c.maxResults != c.total || c.total != c.comments.length }.isEmpty)
+
+  val labels = issues.flatMap(_.fields.labels).distinct
+  val labelHisto = labels.par.map{l => (l, issues.filter(i => i.fields.status.name != "CLOSED" && (i.fields.labels contains l)).length)}.seq.sortBy{case (l, count) => -count}
+
+  // map jira fields to github labels
+  def mapLabels(labels: List[String]): List[String] = labels
+  def mapPriority(priority: Named): List[String] = List(priority.name)
+
+  val ShortVersionRegex = """(Scala\s*)?2\.(\d+)\.(\d+).*""".r
+  def mapShortVersion(version: Named): Option[String] = version.name match {
+    case ShortVersionRegex(_, maj, min) => Some(s"2.$maj.$min")
+    case _ => None
+  }
+
+  object NullEmpty {
+    def unapply(x: String) = Some(if (x == null) "" else x)
+  }
+  val FullVersionRegex = """(Scala\s*)?2\.(\d+)\.(\d+)(-\S+)?.*""".r
+  def mapVersion(version: Named): Option[String] = version.name match {
+    case FullVersionRegex(_, maj, min, NullEmpty(suffix)) => Some(s"2.$maj.$min$suffix")
+    case _ => None
+  }
+
+  def mapResolution(resolution: String) = resolution match {
+    case "Fixed"                   => "fixed"
+    case "Cannot Reproduce"        => "need-more-info"
+    case "Duplicate"               => "duplicate"
+    case "Won't Fix"               => "wontfix"
+    case "Not a Bug"               => "wontfix"
+    case "Out of Scope"            => "wontfix"
+    case "Incomplete"              => "need-more-info"
+    case "Fixed, Backport Pending" => "fixed"
+  }
+
+  def mapIssue(issue: Issue) = {
+    import issue.fields
+    // summary
+    // description
+    // reporter
+    // assignee
+    // fixVersions
+
+    // status
+    // resolution
+
+    // labels
+    // components
+    // issuetype
+    // priority
+    // versions
+    val affects = fields.versions.map(_.name)
+    val labels = mapLabels(fields.labels) ++ mapPriority(fields.priority)
+
+    // comment
+    // issuelinks
+    // attachment
+
+    // watchers
+    // votes
+    // watches
+    val watchCounts   = fields.watches.watchCount
+    val watcherCounts = fields.watchers.map(_.length).getOrElse(0)
+    val voteCounts    = fields.votes.votes
+
+    // created
+    // updated
+    // resolutiondate
+
+    // ignore:
+    // creator
+    // environment
+
+  }
+//
 }
 
 //
